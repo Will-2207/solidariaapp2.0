@@ -62,8 +62,8 @@ function procesarSoporte(array $datos): array {
     return ['tipo' => 'success', 'mensaje' => 'Ticket enviado.', 'token' => $token];
 }
 
-// 5. PROCESAR DONACIÓN
-function procesarDonacion(array $datos): array {
+// 5. PROCESAR DONACIÓN (Actualizado para incluir usuario_id)
+function procesarDonacion(array $datos, int $usuarioId): array {
     $nombre = campo($datos, 'nombre_contacto');
     $email = filter_var(trim($datos['email_contacto'] ?? ''), FILTER_VALIDATE_EMAIL);
     $monto = (float)($datos['monto'] ?? 0);
@@ -74,19 +74,31 @@ function procesarDonacion(array $datos): array {
     }
 
     try {
+        // A. PERSISTENCIA EN MONGODB
         $client = getMongoClient();
         $client->selectCollection(MONGO_DB, COL_DONACIONES)->insertOne([
-            'token_uuid' => $token, 'nombre_contacto' => $nombre, 'monto' => $monto, 'created_at' => new \MongoDB\BSON\UTCDateTime()
+            'token_uuid' => $token, 
+            'usuario_id' => $usuarioId,
+            'nombre_contacto' => $nombre, 
+            'monto' => $monto, 
+            'created_at' => new \MongoDB\BSON\UTCDateTime()
         ]);
 
+        // B. PERSISTENCIA EN POSTGRESQL (Con relación de usuario)
         $db = \SolidariApp\Database::getConnection();
         $db->beginTransaction();
-        $stmt = $db->prepare("INSERT INTO donaciones (nombre_contacto, email_contacto, monto, token_uuid) VALUES (?, ?, ?, ?)");
-        $stmt->execute([$nombre, $email, $monto, $token]);
+        
+        $sql = "INSERT INTO donaciones (nombre_contacto, email_contacto, monto, token_uuid, usuario_id) 
+                VALUES (?, ?, ?, ?, ?)";
+        
+        $stmt = $db->prepare($sql);
+        $stmt->execute([$nombre, $email, $monto, $token, $usuarioId]);
+        
         $db->commit();
     } catch (\Exception $e) {
         if (isset($db) && $db->inTransaction()) $db->rollBack();
-        return ['tipo' => 'error', 'mensaje' => 'Error en transacción: ' . $e->getMessage()];
+        return ['tipo' => 'error', 'mensaje' => 'Error en la transacción: ' . $e->getMessage()];
     }
-    return ['tipo' => 'success', 'mensaje' => 'Donación procesada con éxito.', 'token' => $token];
+    
+    return ['tipo' => 'success', 'mensaje' => 'Donación registrada exitosamente.', 'token' => $token];
 }
